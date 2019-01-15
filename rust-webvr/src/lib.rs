@@ -1,5 +1,9 @@
 #[cfg(all(feature = "vrexternal", target_os= "android"))]
 extern crate libc;
+#[cfg(feature = "magicleap")]
+extern crate euclid;
+#[cfg(feature = "magicleap")]
+extern crate atomicbox;
 extern crate rust_webvr_api;
 #[cfg(all(feature = "googlevr", target_os= "android"))]
 extern crate gvr_sys;

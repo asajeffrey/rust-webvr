@@ -67,6 +67,9 @@ impl VRServiceManager {
             #[cfg(target_os = "android")]
             #[cfg(feature = "oculusvr")]
             OculusVRServiceCreator::new(),
+            // We'd like to initialize the Magic Leap service here,
+            // but we can't because it's only safe to do so on the main
+            // thread, and this function could be called from any thread.
         );
         
         for creator in &creators {

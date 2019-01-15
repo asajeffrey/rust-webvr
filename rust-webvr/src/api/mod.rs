@@ -33,3 +33,8 @@ mod oculusvr;
 pub use self::oculusvr::OculusVRServiceCreator;
 #[cfg(all(feature = "oculusvr", target_os= "android"))]
 pub use self::oculusvr::jni::*;
+
+#[cfg(feature = "magicleap")]
+mod magicleap;
+#[cfg(feature = "magicleap")]
+pub use self::magicleap::MagicLeapVRService;
