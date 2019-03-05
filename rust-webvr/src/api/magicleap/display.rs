@@ -27,14 +27,15 @@ use super::c_api::MLResult;
 use super::heartbeat::MagicLeapVRMainThreadHeartbeat;
 use super::heartbeat::MagicLeapVRMessage;
 
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::Ordering;
-use std::sync::mpsc;
-use std::sync::mpsc::Sender;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::mem;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc;
 
 pub type MagicLeapVRDisplayPtr = Arc<RefCell<MagicLeapVRDisplay>>;
 
@@ -42,8 +43,6 @@ pub struct MagicLeapVRDisplay {
     id: u32,
     display_data: VRDisplayData,
     sender: Sender<MagicLeapVRMessage>,
-    gl_context: MLHandle,
-    graphics_client: MLHandle,
 }
 
 // This is a lie! It is deeply deeply unsound and probably insta-UB.
@@ -120,16 +119,14 @@ impl VRDisplay for MagicLeapVRDisplay {
 impl MagicLeapVRDisplay {
     // This function is unsafe because it must be run on the main thread
     // after initializing the perception system.
-    pub unsafe fn new() -> Result<(MagicLeapVRDisplay, MagicLeapVRMainThreadHeartbeat), MLResult> {
+    pub unsafe fn new(gl_context: Rc<Gl>) -> Result<(MagicLeapVRDisplay, MagicLeapVRMainThreadHeartbeat), MLResult> {
         let (sender, receiver) = mpsc::channel();
         let display = MagicLeapVRDisplay {
             id: utils::new_id(),
             display_data: MagicLeapVRDisplay::display_data()?,
             sender: sender,
-	    gl_context: unimplemented!(),
-	    graphics_client: mem::zeroed(),
         };
-        let heartbeat = MagicLeapVRMainThreadHeartbeat::new(receiver);
+        let heartbeat = MagicLeapVRMainThreadHeartbeat::new(receiver, gl_context)?;
         Ok((display, heartbeat))
     }
 
@@ -210,22 +207,5 @@ impl MagicLeapVRDisplay {
         };
         let right_fov = left_fov.clone();
         Ok((left_fov, right_fov))
-    }
-
-    unsafe fn init_graphics_client(&mut self) -> Result<(), MLResult> {
-        // TODO: initialize GL context
-        let options = MLGraphicsOptions {
-           color_format: unimplemented!(),
-           depth_format: unimplemented!(),
-           graphics_flags: unimplemented!(),
-        };
-	let gl_context = unimplemented!();
-        MLGraphicsCreateClientGL(&options, &self.gl_context, &mut self.graphics_client).ok()?;
-        Ok(())
-    }
-
-    unsafe fn destroy_graphics_client(&mut self) -> Result<(), MLResult> {
-        MLGraphicsDestroyClient(&mut self.graphics_client).ok()?;
-        Ok(())
     }
 }

@@ -1,3 +1,5 @@
+use gleam::gl::Gl;
+
 use rust_webvr_api::VRDisplayPtr;
 use rust_webvr_api::VREvent;
 use rust_webvr_api::VRGamepadPtr;
@@ -12,6 +14,7 @@ use super::c_api::MLResult;
 
 use std::sync::Arc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct MagicLeapVRService {
     display: MagicLeapVRDisplayPtr,
@@ -20,8 +23,8 @@ pub struct MagicLeapVRService {
 impl MagicLeapVRService {
     // This function is unsafe, because it has to be called from the main
     // thread after initializing the perception system.
-    pub unsafe fn new() -> Result<(MagicLeapVRService, MagicLeapVRMainThreadHeartbeat), MLResult> {
-        let (display, heartbeat) = MagicLeapVRDisplay::new()?;
+    pub unsafe fn new(gl_context: Rc<Gl>) -> Result<(MagicLeapVRService, MagicLeapVRMainThreadHeartbeat), MLResult> {
+        let (display, heartbeat) = MagicLeapVRDisplay::new(gl_context)?;
         let service = MagicLeapVRService {
             display: Arc::new(RefCell::new(display)),
         };
