@@ -86,7 +86,7 @@ impl VRDisplay for MagicLeapVRDisplay {
 
     fn future_frame_data(&mut self, near: f64, far: f64) -> VRFutureFrameData {
         let (resolver, result) = VRFutureFrameData::blocked();
-        let _ = self.sender.send(MagicLeapVRMessage::StartFrame(near, far, resolver));
+        let _ = self.sender.send(MagicLeapVRMessage::StartFrame { near, far, resolver });
         result
     }
 
