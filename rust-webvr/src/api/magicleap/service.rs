@@ -4,7 +4,7 @@ use rust_webvr_api::VRGamepadPtr;
 use rust_webvr_api::VRService;
 
 use super::display::MagicLeapVRDisplay;
-use super::display::MagicLeapVRUpdater;
+use super::heartbeat::MagicLeapVRMainThreadHeartbeat;
 use super::display::MagicLeapVRDisplayPtr;
 use super::gamepad::MagicLeapVRGamepadPtr;
 
@@ -20,12 +20,12 @@ pub struct MagicLeapVRService {
 impl MagicLeapVRService {
     // This function is unsafe, because it has to be called from the main
     // thread after initializing the perception system.
-    pub unsafe fn new() -> Result<(MagicLeapVRService, MagicLeapVRUpdater), MLResult> {
-        let (display, updater) = MagicLeapVRDisplay::new()?;
+    pub unsafe fn new() -> Result<(MagicLeapVRService, MagicLeapVRMainThreadHeartbeat), MLResult> {
+        let (display, heartbeat) = MagicLeapVRDisplay::new()?;
         let service = MagicLeapVRService {
             display: Arc::new(RefCell::new(display)),
         };
-        Ok((service, updater))
+        Ok((service, heartbeat))
     }
 }
 

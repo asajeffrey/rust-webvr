@@ -1,6 +1,5 @@
-#![allow(unused_variables)]
-
-use atomicbox::AtomicBox;
+use gleam::gl;
+use gleam::gl::Gl;
 
 use rust_webvr_api::VRDisplay;
 use rust_webvr_api::VRDisplayCapabilities;
@@ -10,6 +9,7 @@ use rust_webvr_api::VRFieldOfView;
 use rust_webvr_api::VRFrameData;
 use rust_webvr_api::VRFramebuffer;
 use rust_webvr_api::VRFramebufferAttributes;
+use rust_webvr_api::VRFutureFrameData;
 use rust_webvr_api::VRLayer;
 use rust_webvr_api::utils;
 
@@ -24,35 +24,26 @@ use super::c_api::MLGraphicsCreateClientGL;
 use super::c_api::MLGraphicsDestroyClient;
 use super::c_api::MLHandle;
 use super::c_api::MLResult;
+use super::heartbeat::MagicLeapVRMainThreadHeartbeat;
+use super::heartbeat::MagicLeapVRMessage;
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::mem;
-
-// This object only exists on the main thread, and is used to update
-// the VRDisplay each time round the main event loop.
-pub struct MagicLeapVRUpdater {
-    frame_data_to_vr_thread: Arc<AtomicBox<Option<VRFrameData>>>,
-    frame_data_buffer: Box<Option<VRFrameData>>,
-    this_struct_isnt_sync_or_send: Cell<()>,
-}
 
 pub type MagicLeapVRDisplayPtr = Arc<RefCell<MagicLeapVRDisplay>>;
 
 pub struct MagicLeapVRDisplay {
     id: u32,
-    presenting: bool,
     display_data: VRDisplayData,
-    frame_data_from_main_thread: Arc<AtomicBox<Option<VRFrameData>>>,
-    // There is interior mutability here to work round
-    // https://github.com/servo/rust-webvr/issues/53
-    frame_data_buffer: RefCell<Box<Option<VRFrameData>>>,
-    frame_data: Cell<VRFrameData>,
-    near: Cell<f64>,
-    far: Cell<f64>,
+    sender: Sender<MagicLeapVRMessage>,
+    gl_context: MLHandle,
+    graphics_client: MLHandle,
 }
 
 // This is a lie! It is deeply deeply unsound and probably insta-UB.
@@ -82,44 +73,42 @@ impl VRDisplay for MagicLeapVRDisplay {
     }
 
     fn immediate_frame_data(&self, near: f64, far: f64) -> VRFrameData {
-        if (near != self.near.get()) || (far != self.far.get()) {
-           self.near.set(near);
-           self.far.set(far);
-           self.send_near_and_far_to_main_thread();
-        }
-
-        self.recv_frame_data_from_main_thread()
+        unimplemented!()
     }
 
     fn synced_frame_data(&self, near: f64, far: f64) -> VRFrameData {
         self.immediate_frame_data(near, far)
     }
 
-    fn reset_pose(&mut self) {
-        unimplemented!()
+    fn reset_pose(&mut self) {}
+
+    fn sync_poses(&mut self) {}
+
+    fn future_frame_data(&mut self, near: f64, far: f64) -> VRFutureFrameData {
+        let (resolver, result) = VRFutureFrameData::blocked();
+        let _ = self.sender.send(MagicLeapVRMessage::StartFrame(near, far, resolver));
+        result
     }
 
-    fn sync_poses(&mut self) {
-        unimplemented!()
-    }
-
-    fn bind_framebuffer(&mut self, eye_index: u32) {
-        unimplemented!()
-    }
+    fn bind_framebuffer(&mut self, eye_index: u32) {}
 
     fn get_framebuffers(&self) -> Vec<VRFramebuffer> {
         unimplemented!()
     }
 
     fn render_layer(&mut self, layer: &VRLayer) {
-        unimplemented!()
+        unreachable!()
     }
 
     fn submit_frame(&mut self) {
-        unimplemented!()
+        unreachable!()
     }
 
-    fn start_present(&mut self, attributes: Option<VRFramebufferAttributes>) {
+    fn submit_layer(&mut self, gl: &Gl, layer: &VRLayer) {
+        unimplemented!()
+    }
+    
+    fn start_present(&mut self, _attributes: Option<VRFramebufferAttributes>) {
         unimplemented!()
     }
 
@@ -131,24 +120,17 @@ impl VRDisplay for MagicLeapVRDisplay {
 impl MagicLeapVRDisplay {
     // This function is unsafe because it must be run on the main thread
     // after initializing the perception system.
-    pub unsafe fn new() -> Result<(MagicLeapVRDisplay, MagicLeapVRUpdater), MLResult> {
-        let frame_data_shared_buffer = Arc::new(AtomicBox::new(Box::new(None)));
+    pub unsafe fn new() -> Result<(MagicLeapVRDisplay, MagicLeapVRMainThreadHeartbeat), MLResult> {
+        let (sender, receiver) = mpsc::channel();
         let display = MagicLeapVRDisplay {
             id: utils::new_id(),
-            presenting: false,
             display_data: MagicLeapVRDisplay::display_data()?,
-	    frame_data_from_main_thread: frame_data_shared_buffer.clone(),
-            frame_data_buffer: RefCell::new(Box::new(None)),
-            frame_data: Cell::new(VRFrameData::default()),
-            near: Cell::new(DEFAULT_NEAR),
-            far: Cell::new(DEFAULT_FAR),
+            sender: sender,
+	    gl_context: unimplemented!(),
+	    graphics_client: mem::zeroed(),
         };
-        let updater = MagicLeapVRUpdater {
-            frame_data_to_vr_thread: frame_data_shared_buffer,
-            frame_data_buffer: Box::new(None),
-            this_struct_isnt_sync_or_send: Cell::new(()),
-        };
-        Ok((display, updater))
+        let heartbeat = MagicLeapVRMainThreadHeartbeat::new(receiver);
+        Ok((display, heartbeat))
     }
 
     // This function is unsafe because it must be run on the main thread
@@ -231,62 +213,19 @@ impl MagicLeapVRDisplay {
     }
 
     unsafe fn init_graphics_client(&mut self) -> Result<(), MLResult> {
-        if self.presenting {
-            return Ok(());
-        }
-
         // TODO: initialize GL context
         let options = MLGraphicsOptions {
            color_format: unimplemented!(),
            depth_format: unimplemented!(),
            graphics_flags: unimplemented!(),
         };
-        // MLGraphicsCreateClientGL(&options, &self.gl_context, &mut self.graphics_client).ok()?;
-
-        self.presenting = true;
+	let gl_context = unimplemented!();
+        MLGraphicsCreateClientGL(&options, &self.gl_context, &mut self.graphics_client).ok()?;
         Ok(())
     }
 
     unsafe fn destroy_graphics_client(&mut self) -> Result<(), MLResult> {
-        if !self.presenting {
-            return Ok(());
-        }
-
-        // MLGraphicsDestroyClient(&mut self.graphics_client).ok()?;
-
-        self.presenting = false;
-        Ok(())
-    }
-
-    fn send_near_and_far_to_main_thread(&self) {
-        unimplemented!()
-    }
-
-    fn recv_frame_data_from_main_thread(&self) -> VRFrameData {
-        // Annoyingly, we don't have `&mut self`, so we need to use
-        // interior mutability here.
-        let mut buffer = self.frame_data_buffer.borrow_mut(); 
-        self.frame_data_from_main_thread.swap_mut(&mut *buffer, Ordering::AcqRel);
-        let result = self.frame_data_buffer.borrow_mut().take().unwrap_or_else(|| self.frame_data.take());
-        self.frame_data.set(result.clone());
-        result
-   }
-}
-
-impl MagicLeapVRUpdater {
-    fn get_current_frame_data(&mut self) -> Result<VRFrameData, MLResult> {
-        unimplemented!()
-    }
-
-    fn send_frame_data_to_vr_thread(&mut self) -> Result<(), MLResult> {
-        let frame_data = self.get_current_frame_data()?;
-        *self.frame_data_buffer = Some(frame_data);
-        self.frame_data_to_vr_thread.swap_mut(&mut self.frame_data_buffer, Ordering::AcqRel);
-        Ok(())
-    }
-
-    pub fn update(&mut self) -> Result<(), MLResult> {
-        self.send_frame_data_to_vr_thread()?;
+        MLGraphicsDestroyClient(&mut self.graphics_client).ok()?;
         Ok(())
     }
 }

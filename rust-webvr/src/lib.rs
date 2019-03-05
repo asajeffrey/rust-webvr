@@ -1,9 +1,5 @@
 #[cfg(all(feature = "vrexternal", target_os= "android"))]
 extern crate libc;
-#[cfg(feature = "magicleap")]
-extern crate euclid;
-#[cfg(feature = "magicleap")]
-extern crate atomicbox;
 extern crate rust_webvr_api;
 #[cfg(all(feature = "googlevr", target_os= "android"))]
 extern crate gvr_sys;
@@ -13,9 +9,9 @@ extern crate libloading;
 extern crate log;
 #[cfg(all(feature = "oculusvr", target_os= "android"))]
 extern crate ovr_mobile_sys;
-#[cfg(feature = "glwindow")]
+#[cfg(any(feature = "magicleap", feature = "glwindow"))]
 extern crate euclid;
-#[cfg(feature = "glwindow")]
+#[cfg(any(feature = "magicleap", feature = "glwindow"))]
 extern crate gleam;
 #[cfg(feature = "glwindow")]
 extern crate glutin;
